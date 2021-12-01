@@ -1,0 +1,755 @@
+Lab 5 - Setting up Jenkins
+1) Install Docker
+	https://docs.docker.com/desktop/windows/install/
+	# test that docker is installed and running
+		docker run hello-docker
+
+	# Docker cheat sheet
+		https://dockerlabs.collabnix.com/docker/cheatsheet/
+
+2) Setting up Jenkins
+	# Create network bridge
+		docker network create jenkins
+
+	# Run a docker in docker image
+		docker run --name jenkins-docker --rm --detach ^
+		  --privileged --network jenkins --network-alias docker ^
+		  --env DOCKER_TLS_CERTDIR=/certs ^
+		  --volume jenkins-docker-certs:/certs/client ^
+		  --volume jenkins-data:/var/jenkins_home ^
+		  docker:dind
+
+	# Create the docker file
+		FROM jenkins/jenkins:2.303.2-jdk11
+		USER root
+		RUN apt-get update && apt-get install -y apt-transport-https \
+			   ca-certificates curl gnupg2 \
+			   software-properties-common
+		RUN curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -
+		RUN apt-key fingerprint 0EBFCD88
+		RUN add-apt-repository \
+			   "deb [arch=amd64] https://download.docker.com/linux/debian \
+			   $(lsb_release -cs) stable"
+		RUN apt-get update && apt-get install -y docker-ce-cli
+		USER jenkins
+		RUN jenkins-plugin-cli --plugins "blueocean:1.24.7 docker-workflow:1.26"
+
+		# Name is 'Dockerfile'
+		# Save as 'All types'
+
+	# Create Image from docker file
+		docker build -t myjenkins-blueocean:1.1 .
+
+	# Run the docker image
+		docker run --name jenkins-blueocean --rm --detach ^
+		  --network jenkins --env DOCKER_HOST=tcp://docker:2376 ^
+		  --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 ^
+		  --volume jenkins-data:/var/jenkins_home ^
+		  --volume jenkins-docker-certs:/certs/client:ro ^
+		  --publish 8080:8080 --publish 50000:50000 myjenkins-blueocean:1.1
+	  
+	# Check on docker desktop that both containers are running
+	
+	# If need to go in
+		docker exec -it jenkins-blueocean bash
+
+	# Also can try running outside without docker in docker
+		docker run --name jenkins-blueocean --rm --detach ^
+			--user root ^
+			--volume /var/run/docker.sock:/var/run/docker.sock ^
+			--volume jenkins-data:/var/jenkins_home ^
+			--volume "%HOMEDRIVE%%HOMEPATH%":/home ^
+			--publish 8080:8080 myjenkins-blueocean:1.1
+		
+	# If you want to stop
+		docker stop jenkins-blueocean jenkins-docker
+
+
+	# Getting the adminstrator password for first time run and setup
+		# Click the cude container icon in docker desktop
+		# The password should be there
+			ce452b7c8e174a7a97f878a62be2dee7
+
+	# Install suggested plugins
+
+	# For simplicity, all fields are 'admin'
+		# email is admin@admin.admin
+
+	# Jenkins URL
+		http://localhost:8080/
+
+	# If for some reason cannot run some stuff, try run twice
+	
+	# Fork the sample node.js thing
+		https://github.com/jeremychua201/simple-node-js-react-npm-app
+
+		# Clone to local repo
+
+3) Create a Pipeline in Jenkins
+	# Make a new Item in Jenkins
+		# inside Jenkins on the left click 'New Item'
+	
+		# The name is
+			'simple-node-js-react-npm-app'
+		
+		# Choose pipeline
+			scroll down and click 'Pipeline'
+		
+		# Description is optional
+	
+		# Go to pipeline tab
+		# Under the definition, choose 'Pipeline script from SCM
+		# Under the SCM, choose 'Git'
+		# By right can use this route
+			/home/Documents/GitHub/simple-node-js-react-npm-app
+		# But i used this instead
+			https://github.com/jeremychua201/simple-node-js-react-npm-app
+		
+		# Created le
+	
+	# Create a 'Jenkinsfile'
+	# inside put
+		pipeline {
+			agent {
+				docker {
+					image 'node:lts-buster-slim' 
+					args '-p 3000:3000' 
+				}
+			}
+			stages {
+				stage('Build') { 
+					steps {
+						sh 'npm install' 
+					}
+				}
+			}
+		}
+	
+	# Place it in the root of the repo
+	# Commit the change
+	
+	# Go back to Jenkins dashboard
+	# Go to the BlueOcean tab
+	
+	# It should say this job has not been run
+	# click 'run'
+	# Then click 'started by admin'
+	# Everything should pass
+	
+	# Add a test stage to the pipeline
+	# Change the Jenkinsfileto this
+		pipeline {
+			agent {
+				docker {
+					image 'node:lts-buster-slim'
+					args '-p 3000:3000'
+				}
+			}
+			environment {
+				CI = 'true' 
+			}
+			stages {
+				stage('Build') {
+					steps {
+						sh 'npm install'
+					}
+				}
+				stage('Test') { 
+					steps {
+						sh './jenkins/scripts/test.sh' 
+					}
+				}
+			}
+		}
+	
+	# Save and commit the change
+	
+	# Go back to bluecoean in Jenkins and click run again
+	
+	# The tests should pass
+	
+	# Add a deliever stage
+	# Go back to the Jenkinsfile
+	# change it to this
+		pipeline {
+			agent {
+				docker {
+					image 'node:lts-buster-slim'
+					args '-p 3000:3000'
+				}
+			}
+			environment { 
+				CI = 'true'
+			}
+			stages {
+				stage('Build') {
+					steps {
+						sh 'npm install'
+					}
+				}
+				stage('Test') {
+					steps {
+						sh './jenkins/scripts/test.sh'
+					}
+				}
+				stage('Deliver') { 
+					steps {
+						sh './jenkins/scripts/deliver.sh' 
+						input message: 'Finished using the web site? (Click "Proceed" to continue)' 
+						sh './jenkins/scripts/kill.sh' 
+					}
+				}
+			}
+		}
+	
+	# Save and commit the change
+	# Run the build again
+	# Should be able to go to localhost:3000
+	# But i couldn't go
+	
+	# Then done le
+
+------------------------------------------ End of Lab 5 -----------------------------------------
+
+Lab 6 - OWASP Dependency-Check
+1) Run docker in  docker
+	docker run --name jenkins-docker --rm --detach ^
+	  --privileged --network jenkins --network-alias docker ^
+	  --env DOCKER_TLS_CERTDIR=/certs ^
+	  --volume jenkins-docker-certs:/certs/client ^
+	  --volume jenkins-data:/var/jenkins_home ^
+	  docker:dind
+  
+2) Run blue ocean
+	docker run --name jenkins-blueocean --rm --detach ^
+	  --network jenkins --env DOCKER_HOST=tcp://docker:2376 ^
+	  --env DOCKER_CERT_PATH=/certs/client --env DOCKER_TLS_VERIFY=1 ^
+	  --volume jenkins-data:/var/jenkins_home ^
+	  --volume jenkins-docker-certs:/certs/client:ro ^
+	  --volume "%HOMEDRIVE%%HOMEPATH%":/home ^
+	  --publish 8080:8080 --publish 50000:50000 myjenkins-blueocean:1.1
+	  
+	username: admin
+	password: admin
+
+3) Install OWASP Dependency Check
+	# Go to Manage Jenkins > Manage Plugins > Available
+	# Look for 'OWASP Dependency-Check' and install
+
+	# Go to Manage Jenkins > Global Tool Configuration
+	# Scroll to Dependency-Check and add Dependency-Check
+
+	# I used 'Default'
+
+	# Create a new pipeline like in Lab 5
+	# Used URL 'https://github.com/jeremychua201/JenkinsDependencyCheckTest'
+	# Add the Jenkinsfile
+		pipeline {
+			agent any
+			stages {
+				stage('Checkout SCM') {
+					steps {
+						git 'https://github.com/jeremychua201/JenkinsDependencyCheckTest'
+					}
+				}
+
+				stage('OWASP DependencyCheck') {
+					steps {
+						dependencyCheck additionalArguments: '--format HTML --format XML', odcInstallation: 'Default'
+					}
+				}
+			}	
+			post {
+				success {
+					dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+				}
+			}
+		}
+
+	# Commit jenkins file to the repo
+	# Run the build
+	# The name in the Jenkinsfile and the OWASP Dependency-Check has to be the same
+
+	# Go to dashboard > owasp-dcp > status
+	# from here can also see details build #6
+	# inside can see Dependency-Check and workspaces
+	# from workspaces, go in then download and open 'dependency-check-report.html'
+
+	# Suppress false positive
+	# Go to the false positive, example 'CVE-2015-9251'
+	# click supress
+	# view complete XML
+	# Copy it then save it as an XML in the root, same level as the jenkinsfile
+
+	# change the jenkins file to include the suppression
+		pipeline {
+			agent any
+			stages {
+				stage('Checkout SCM') {
+					steps {
+						git 'https://github.com/jeremychua201/JenkinsDependencyCheckTest'
+					}
+				}
+
+				stage('OWASP DependencyCheck') {
+					steps {
+						dependencyCheck additionalArguments: '--format HTML --format XML --suppression suppression.xml', odcInstallation: 'Default'
+					}
+				}
+			}	
+			post {
+				success {
+					dependencyCheckPublisher pattern: 'dependency-check-report.xml'
+				}
+			}
+		}
+
+	# save adn commit the change
+
+	# see that now there are only three vulnerbilities
+
+------------------------------------------ End of Lab 6 -----------------------------------------
+
+Lab 7a
+1) Start initial Git repo for testing
+	# I used Github Desktop to add and commit intial files
+	
+2) Start Docker and run jenkins
+	# New Docker command to fix the home repo issue
+	docker run ^
+	  --name jenkins-docker ^
+	  --rm ^
+	  --detach ^
+	  --privileged ^
+	  --network jenkins ^
+	  --network-alias docker ^
+	  --env DOCKER_TLS_CERTDIR=/certs ^
+	  --volume jenkins-docker-certs:/certs/client ^
+	  --volume jenkins-data:/var/jenkins_home ^
+	  --publish 3000:3000 ^
+	  --publish 2376:2376 ^
+	  docker:dind ^
+	  --storage-driver overlay2
+	  
+	 docker run ^
+	  --name jenkins-blueocean ^
+	  --rm ^
+	  --detach ^
+	  --network jenkins ^
+	  --env DOCKER_HOST=tcp://docker:2376 ^
+	  --env DOCKER_CERT_PATH=/certs/client ^
+	  --env DOCKER_TLS_VERIFY=1 ^
+	  --volume jenkins-data:/var/jenkins_home ^
+	  --volume jenkins-docker-certs:/certs/client:ro ^
+	  --volume "%HOMEDRIVE%%HOMEPATH%":/home ^
+	  --publish 8080:8080 ^
+	  --publish 50000:50000 ^
+	  myjenkins-blueocean:1.1	
+	  
+3) Create a new pipeline
+	# Login to Jenkins and Start a new pipeline
+	# This is the path i used:
+	# /home/Documents/GitHub/jenkins-phpunit-test
+	
+	### if the build doesn't trigger, go to the pipeline config
+	### Change the 'master' to 'main'
+	
+	# Then run the build once in jenkins blueocean to start
+	
+	# This is the new Jenkinsfile
+	pipeline {
+		agent {
+			docker {
+				image 'composer:latest'
+			}
+		}
+		stages {
+			stage('Build') {
+				steps {
+					sh 'composer install'
+				}
+			}
+			stage('Test') {
+				steps {
+					sh './vendor/bin/phpunit --log-junit logs/unitreport.xml -c tests/phpunit.xml tests'
+				}
+			}
+		}
+		post {
+			always {
+				junit testResults: 'logs/unitreport.xml'
+			}
+		}
+	}  
+	
+	# Then run the build in BlueOcean
+	
+3) Testing the testing
+	# Introduce a bug into the code
+	# The build fails
+	# Can go to the pipline, build history, then test result
+	
+------------------------------------------ End of Lab 7a -----------------------------------------
+Lab 7b
+1) Start a new repo for the selenium tests
+	git init
+	git update-index --chmod=+x jenkins/scripts/deploy.sh
+	git update-index --chmod=+x jenkins/scripts/kill.sh
+	
+	# change the line in the deploy.sh file
+		docker run -d -p 80:80 --name my-apache-php-app -v c:\\Users\\jerem\\Documents\\GitHub\\jenkins-php-selenium-test\\src:/var/www/html php:7.2-apache
+	
+	git add .
+	git commit -m “Add initial files”
+	
+	# these commands come after a commit command
+	git branch -M main
+	git remote add origin https://github.com/jeremychua201/jenkins-php-selenium-test.git
+	git push -u origin main
+	
+2) After that run the commands to change the permission of ome files
+	# I cd into the repo folder then ran the commands
+		git update-index --chmod=+x jenkins/scripts/deploy.sh
+		git update-index --chmod=+x jenkins/scripts/kill.sh
+		
+3) Modify the deploy.sh
+	# the file is in jenkins/scripts
+	# i chnaged it to 
+	# docker run -d -p 80:80 --name my-apache-php-app -v c:\\Users\jerem\Documents\GitHub\\jenkins-php-selenium-test\\src:/var/www/html php:7.2-apache
+
+
+------------------------------------------ End of Lab 7b -----------------------------------------
+
+Lab 8
+1) Start Docker and Jenkins
+
+2) Install Warnings Next Generation Plugin
+	# Then Restart
+
+
+3) Bash into the blueocean docker container
+	# docker exec -it jenkins-blueocean /bin/bash
+	
+	# cd /var/jenkins_home
+	# curl http://mirrors.estointernet.in/apache/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz --output apache-maven-3.6.3-bin.tar.gz
+	# tar -xvzf apache-maven-3.6.3-bin.tar.gz && cd apache-maven-3.6.3
+	# pwd
+	# /var/jenkins_home/apache-maven-3.6.3
+
+4) In Jenkins install the plugins
+	# Maven Integration
+	# Maven Invoker
+	
+	# Install without restart
+	
+5) In Jenkins > Global tool configuration
+	# under maven, 'add maven'
+	# the name is maven, then uncheck install automaticaly
+	# then paste the path
+	# /var/jenkins_home/apache-maven-3.6.3
+	
+6) Make a new pipeline
+	# in the pipeline tab add a script
+	
+	pipeline {
+		agent any
+		stages {
+			stage ('Checkout') {
+				steps {
+					git branch:'master', url: 'https://github.com/ScaleSec/vulnado.git'
+				}
+			}
+			stage ('Build') {
+				steps {
+					sh '/var/jenkins_home/apache-maven-3.6.3/bin/mvn --batch-mode -V -U -e clean verify -Dsurefire.useFile=false -Dmaven.test.failure.ignore'
+				}
+			}
+			stage ('Analysis') {
+				steps {
+					sh '/var/jenkins_home/apache-maven-3.6.3/bin/mvn --batch-mode -V -U -e checkstyle:checkstyle pmd:pmd pmd:cpd findbugs:findbugs'
+				}
+			}
+		}
+		post {
+			always {
+				junit testResults: '**/target/surefire-reports/TEST-*.xml'
+				recordIssues enabledForFailure: true, tools: [mavenConsole(), java(), javaDoc()]
+				recordIssues enabledForFailure: true, tool: checkStyle()
+				recordIssues enabledForFailure: true, tool: spotBugs(pattern:
+				'**/target/findbugsXml.xml')
+				recordIssues enabledForFailure: true, tool: cpd(pattern: '**/target/cpd.xml')
+				recordIssues enabledForFailure: true, tool: pmdParser(pattern: '**/target/pmd.xml')
+			}
+		}
+	}
+
+	# Build the pipeline
+	
+	# Go back and see Maven Warnings
+
+------------------------------------------ End of Lab 8  -----------------------------------------
+
+Lab 9 
+1) Start Jenkins, same as previous labs
+
+2) Install the SonarQube Scanner plugin into Jenkins
+
+3) Pull and run sonarqube image from docker
+	# docker pull sonarqube
+	# docker run -d --name sonarqube -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true -p 9000:9000 sonarqube:latest
+	
+4) Access SonarQube
+	# http://localhost:9000/
+	# login is 'admin', password is 'adminn'
+	
+5) Create new manual project
+	# name and key is 'OWASP'
+	
+6) Select Locally
+	# generate token using 'textingtoken'
+	# I got '6aa2821a6aa1c3c453b8a8c16c9ee654706fa5ae'
+	
+	# I used python and linux for the OS and language
+	# The command was 
+		sonar-scanner \
+		  -Dsonar.projectKey=OWASP \
+		  -Dsonar.sources=. \
+		  -Dsonar.host.url=http://localhost:9000 \
+		  -Dsonar.login=6aa2821a6aa1c3c453b8a8c16c9ee654706fa5ae
+		
+7) Configure SonarQube in Jenkins
+	# Go to Manage Jenkins > Configure System, then find SonarQube
+	# Then 'add SonarQube'
+	# the Name is 'SonarQube'
+	# The server URL is the computer IP address
+		# for me it was 'http://192.168.0.240:9000/'
+	
+	# Click the 'add' in the dropdown
+	# Choose 'secret text'
+	# The password is same as the token just now, '6aa2821a6aa1c3c453b8a8c16c9ee654706fa5ae'
+	
+	# Then 'save'
+	
+	
+8) Configure in Global tool Configuration
+	## Not inside manage Jenkins, Go global tool configuration
+	# Go to SonarQube and add a 'SonarQube Scanner'
+	
+	# The name is 'SonarQube'
+	# Choose the same version of sonarqube
+	# Click 'save'
+	
+9) Configure the JenkinsFile
+	# mine looked like this
+	pipeline {
+		agent any
+		stages {
+			stage ('Checkout') {
+				steps {
+					git branch:'master', url: 'https://github.com/OWASP/Vulnerable-Web-Application.git'
+				}
+			}
+			stage('Code Quality Check via SonarQube') {
+				steps {
+					script {
+						def scannerHome = tool 'SonarQube';
+						withSonarQubeEnv('SonarQube') {
+							sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=OWSAP -Dsonar.sources=."
+						}
+					}
+				}
+			}
+		}
+		post {
+			always {
+				recordIssues enabledForFailure: true, tool: sonarQube()
+			}
+		}
+	}
+	
+10) View SonarQube
+	# go to localhost:9000
+	# go to issues tab
+	# then click on vulnerbility
+	
+11) Running Stand alone sonarqube
+	docker run --rm -e SONAR_HOST_URL=http://192.168.0.240:9000 -e SONAR_LOGIN=6aa2821a6aa1c3c453b8a8c16c9ee654706fa5ae -it -v "%cd%:/usr/src" sonarsource/sonar-scanner-cli -Dsonar.projectKey=OWASP
+	
+	# it will take awhile
+	
+------------------------------------------ End of Lab 9  -----------------------------------------
+
+
+
+Setting up AWS
+
+!!! ---------- Remember during the setup process to save the PEM key ---------- !!!
+
+1) Add rules
+	# port 5000 and 8080
+	# ::/0
+	# 0.0.0.0/0
+	# one is for IPv4 one is for IPv6
+	
+2) SSH into the instance
+	# cd to the folder with the pem key
+	ssh -i "EC2_key.pem" ubuntu@ec2-122-248-221-188.ap-southeast-1.compute.amazonaws.com
+	
+--------------------------------------- Linus Commands --------------------------------------
+
+	ls 				for to list files
+	ls -a 			see hhidden files
+	ls -al 			see details also
+	cd
+	mkdir <name>	create new folder
+	rmdir			delete dir
+	rm -rf			force delete
+	pwd				current location
+	
+------------------------------------- End Linus Commands ------------------------------------
+	
+3) Install docker
+	# Update the apt package index and install packages to allow apt to use a repository over HTTPS:
+		sudo apt-get update
+		
+		sudo apt-get install \
+			ca-certificates \
+			curl \
+			gnupg \
+			lsb-release
+	
+	# Add Docker’s official GPG key:
+		curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+	
+	# Use the following command to set up the stable repository. 
+	# To add the nightly or test repository, add the word nightly or test (or both) after the word stable in the commands below. 
+	# Learn about nightly and test channels.
+		echo \
+		  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+		  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+		  
+	# Update the apt package index, and install the latest version of Docker Engine and containerd, 
+	# or go to the next step to install a specific version:
+		sudo apt-get update
+		
+		sudo apt-get install docker-ce docker-ce-cli containerd.io
+		  
+	# List available docker versions
+		apt-cache madison docker-ce
+	
+	# install specicifu docker version
+	# Replace version string with the version from the second coloumn
+		sudo apt-get install docker-ce=<VERSION_STRING> docker-ce-cli=<VERSION_STRING> containerd.io
+		example 'sudo apt-get install docker-ce=5:20.10.11~3-0~ubuntu-focal docker-ce-cli=5:20.10.11~3-0~ubuntu-focal containerd.io'
+		  
+	# Verify that docker is running
+	# both also can
+		sudo docker
+		sudo docker run hello-world
+		  
+	# COnfigure docker t ostart on boot
+		sudo systemctl enable docker.service
+		
+		sudo systemctl enable containerd.service
+		  
+	# verify
+		systemctl status docker
+		
+	# add user to docker group
+		sudo groupadd docker
+		
+		sudo usermod -aG docker $USER
+		
+		newgrp docker 
+
+4) Install Git
+	sudo apt-get install git 
+	
+	#either or
+		sudo apt install gitsome
+
+	
+5) Setup Jenkins
+docker run \
+--name jenkins-docker \
+--rm \
+--detach \
+--privileged \
+--network jenkins \
+--network-alias docker \
+--env DOCKER_TLS_CERTDIR=/certs \
+--volume jenkins-docker-certs:/certs/client \
+--volume jenkins-data:/var/jenkins_home \
+--publish 3000:3000 \
+--publish 2376:2376 \
+docker:dind \
+--storage-driver overlay2
+	  
+	  
+	# Create the dockerfile for blue coean
+		nano Dockerfile
+		
+	# Inside should look like that
+		FROM jenkins/jenkins:2.303.2-jdk11
+		USER root
+		RUN apt-get update && apt-get install -y apt-transport-https \
+				   ca-certificates curl gnupg2 \
+				   software-properties-common
+		RUN curl -fsSL https://download.docker.com/linux/debian/gpg | apt-key add -
+		RUN apt-key fingerprint 0EBFCD88
+		RUN add-apt-repository \
+				"deb [arch=amd64] https://download.docker.com/linux/debian \
+				$(lsb_release -cs) stable"
+		RUN apt-get update && apt-get install -y docker-ce-cli
+		USER jenkins
+		RUN jenkins-plugin-cli --plugins "blueocean:1.24.7 docker-workflow:1.26"
+		
+	# then save
+		ctrl + X
+		
+	# then save and exit
+	# verify with
+		ls
+		
+	# Get blueocean image
+		docker build -t myjenkins-blueocean:1.1 .
+		
+	docker network create jenkins
+	
+docker run \
+--name jenkins-blueocean \
+--rm \
+--detach \
+--network jenkins \
+--env DOCKER_HOST=tcp://docker:2376 \
+--env DOCKER_CERT_PATH=/certs/client \
+--env DOCKER_TLS_VERIFY=1 \
+--volume jenkins-data:/var/jenkins_home \
+--volume jenkins-docker-certs:/certs/client:ro \
+--volume "$HOME":/home \
+--publish 8080:8080 \
+--publish 50000:50000 \
+myjenkins-blueocean:1.1
+		  
+	# Getting the docker key
+		docker container exec -it jenkins-blueocean cat /var/jenkins_home/secrets/initialAdminPassword
+		
+	# if need exit container is ctrl + d
+	
+	# This was my key	
+		51cbedd262564e33a461062cbc855409
+		
+	# got two opens, click the second one
+		  
+	# i just use admin for everything hahaha :')
+	# and school email
+		  
+6) Clone repo
+	gh repo clone https://github.com/jeremychua201/simple-node-js-react-npm-app
+	
+	git clone https://github.com/jeremychua201/simple-node-js-react-npm-app
+		  
+		  
+		  
+	
+	
